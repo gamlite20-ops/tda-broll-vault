@@ -64,80 +64,75 @@ async function downloadTo(url, dest, timeoutMs = 60000) {
 }
 
 // Generate an AI image: Gemini (primary) → Cloudflare Flux → Pollinations.
+// Fast failover: each provider gets ONE quick attempt so a slow/failing
+// provider doesn't stall the whole pack.
 export async function generateAiImage(prompt, dest, { width = 1280, height = 720, aspect = '16:9' } = {}) {
   // 1) Gemini image generation (user's key already configured — best quality).
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 45000);
       try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 90000);
-        try {
-          const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${geminiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: `Generate a ${aspect} aspect ratio cinematic image (${width}x${height}): ${prompt}` }] }],
-                generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-              }),
-              signal: ctrl.signal,
-            }
-          );
-          const data = await res.json();
-          const parts = data?.candidates?.[0]?.content?.parts || [];
-          const imgPart = parts.find((p) => p.inlineData?.data);
-          if (!imgPart) throw new Error(data?.error?.message || 'No image in Gemini response');
-          fs.writeFileSync(dest, Buffer.from(imgPart.inlineData.data, 'base64'));
-          return { provider: 'Gemini AI', file: dest };
-        } finally {
-          clearTimeout(timer);
-        }
-      } catch (e) {
-        console.error('[aigen] Gemini image failed:', e.message);
-        if (attempt === 1) break;
-        await new Promise((r) => setTimeout(r, 3000));
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: `Generate a ${aspect} aspect ratio cinematic image (${width}x${height}): ${prompt}` }] }],
+              generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+            }),
+            signal: ctrl.signal,
+          }
+        );
+        const data = await res.json();
+        const parts = data?.candidates?.[0]?.content?.parts || [];
+        const imgPart = parts.find((p) => p.inlineData?.data);
+        if (!imgPart) throw new Error(data?.error?.message || 'No image in Gemini response');
+        fs.writeFileSync(dest, Buffer.from(imgPart.inlineData.data, 'base64'));
+        return { provider: 'Gemini AI', file: dest };
+      } finally {
+        clearTimeout(timer);
       }
+    } catch (e) {
+      console.error('[aigen] Gemini image failed, trying Flux:', e.message);
     }
   }
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
-  // Try Flux first.
+  // Try Flux once (fast failover).
   if (accountId && token) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 45000);
       try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 60000);
-        try {
-          const res = await fetch(
-            `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
-            {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ prompt }),
-              signal: ctrl.signal,
-            }
-          );
-          const data = await res.json();
-          const b64 = data?.result?.image;
-          if (!b64) throw new Error('No image in Flux response');
-          fs.writeFileSync(dest, Buffer.from(b64, 'base64'));
-          return { provider: 'Cloudflare Flux', file: dest };
-        } finally {
-          clearTimeout(timer);
-        }
-      } catch (e) {
-        if (attempt === 1) break;
-        await new Promise((r) => setTimeout(r, 3000));
+        const res = await fetch(
+          `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt }),
+            signal: ctrl.signal,
+          }
+        );
+        const data = await res.json();
+        const b64 = data?.result?.image;
+        if (!b64) throw new Error('No image in Flux response');
+        fs.writeFileSync(dest, Buffer.from(b64, 'base64'));
+        return { provider: 'Cloudflare Flux', file: dest };
+      } finally {
+        clearTimeout(timer);
       }
+    } catch (e) {
+      console.error('[aigen] Flux failed, trying Pollinations:', e.message);
     }
   }
-  // Fallback: Pollinations.
+  // Fallback: Pollinations (reliable, ~5s).
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random() * 1e9)}`;
-      await downloadTo(url, dest, 90000);
+      await downloadTo(url, dest, 60000);
       // Verify it's a JPEG.
       const head = fs.readFileSync(dest).subarray(0, 2).toString('hex');
       if (head !== 'ffd8') throw new Error('Not a valid JPEG');

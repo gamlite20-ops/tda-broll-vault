@@ -65,31 +65,40 @@ export async function buildBrollPack(script, options = {}) {
 
     // AI-FIRST (user): every 4s segment gets an AI-generated visual.
     // Flow per segment: analyze → write prompt → generate image → animate to 4s video.
+    // Progress updates after EVERY segment so the UI never looks stuck.
     const results = [];
-    const BATCH = 2; // AI generation is heavy — 2 at a time.
+    const BATCH = 4; // 4 parallel AI generations.
+    let doneCount = 0;
+    const updateProgress = (currentSegNum) => {
+      status.progress = 10 + Math.round((doneCount / segments.length) * 70);
+      status.stageDetail = `AI clip ${doneCount}/${segments.length} ready… (generating #${currentSegNum})`;
+      save(status);
+    };
     for (let b = 0; b < segments.length; b += BATCH) {
       const batch = segments.slice(b, b + BATCH);
       const found = await Promise.all(batch.map(async (seg) => {
         const num = String(seg.segId + 1).padStart(3, '0');
+        updateProgress(seg.segId + 1);
         try {
           const prompt = writeScenePrompt(seg, aspect);
           const imgPath = path.join(mediaDir, `seg-${num}-ai.jpg`);
           const gen = await generateAiImage(prompt, imgPath, { width: w, height: h, aspect });
           const vidPath = path.join(mediaDir, `seg-${num}-ai.mp4`);
           await imageToVideo(imgPath, vidPath, 4, seg.segId, { width: w, height: h });
+          doneCount++;
+          updateProgress(seg.segId + 1);
           return {
             status: 'ok', provider: gen.provider + ' (AI video)',
             kind: 'video', file: vidPath, prompt,
             fileUrl: '', assetId: `ai-${seg.segId}`,
           };
         } catch (e) {
+          doneCount++;
+          updateProgress(seg.segId + 1);
           return { status: 'failed', error: e.message, segId: seg.segId };
         }
       }));
       for (const a of found) results.push(a);
-      status.progress = 10 + Math.round(((b + batch.length) / segments.length) * 70);
-      status.stageDetail = `Generated ${results.filter((r) => r.status === 'ok').length}/${segments.length} AI clips…`;
-      save(status);
     }
 
     // Organize: seg-001.mp4, seg-002.jpg… (4s each, in timeline order).
