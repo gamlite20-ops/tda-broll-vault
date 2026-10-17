@@ -80,8 +80,8 @@ export async function generateAiImage(prompt, dest, { width = 1280, height = 720
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
   const FLUX_MODELS = [
-    '@cf/black-forest-labs/flux-2-dev',      // FLUX.2 — highly realistic & detailed
-    '@cf/black-forest-labs/flux-1-schnell',  // FLUX.1 — fast fallback
+    '@cf/black-forest-labs/flux-1-schnell',  // FLUX.1 — proven working
+    '@cf/black-forest-labs/flux-2-dev',      // FLUX.2 — try upgrade (may need partner access)
     '@cf/lykon/dreamshaper-8-lcm',           // Dreamshaper — photorealism tuned
   ];
   if (accountId && token) {
@@ -95,10 +95,7 @@ export async function generateAiImage(prompt, dest, { width = 1280, height = 720
             {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                prompt,
-                num_steps: 8, // More steps = better quality (still fast)
-              }),
+              body: JSON.stringify({ prompt }),
               signal: ctrl.signal,
             }
           );
