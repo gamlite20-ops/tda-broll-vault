@@ -28,7 +28,9 @@ function segmentScript(script, scenes) {
         text: chunk,
         visualConcept: scene.visualConcept || chunk.slice(0, 120),
         // Proof mode: detect historical content for archival priority.
-        isHistorical: /histor|century|19\d\d|20\d\d|ancient|empire|war|king|queen|president|civilization|archaeolog/i.test(chunk + ' ' + (scene.visualConcept || '')),
+        // NOTE: year regex requires "year 19xx"/"19xxs"/"in 1947" context — bare "2024"
+        // in modern tech text must NOT trigger historical mode.
+        isHistorical: /histor|century|ancient|empire|archaeolog|civilization|medieval|renaissance|\b(king|queen|pharaoh|emperor|president)\b.*\b(19|20)\d\d\b|\b(19\d\d|18\d\d|17\d\d)s\b/i.test(chunk + ' ' + (scene.visualConcept || '')),
         startSec: segIdx * 4,
         durationSec: 4,
       });

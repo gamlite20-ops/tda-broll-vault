@@ -15,6 +15,8 @@ export const RATIOS = {
   '1:1': { w: 1080, h: 1080, label: '1:1 — Instagram square' },
 };
 // Write a detailed AI prompt from the scene's text (the tool "thinks" per scene).
+// QUALITY RULES: bright, clear, illustrative — never dark/muddy. Every prompt
+// must visualize the SPECIFIC concept in the text, not generic "cinematic" filler.
 export function writeScenePrompt(seg, aspect = '16:9') {
   const text = seg.text || '';
   const concept = seg.visualConcept || text.slice(0, 120);
@@ -24,28 +26,34 @@ export function writeScenePrompt(seg, aspect = '16:9') {
   const isAction = /run|fight|battle|chase|explode|race|war|attack/i.test(text);
   const isNature = /mountain|river|forest|ocean|sky|desert|tree|bird|sun|moon/i.test(text);
   const isPerson = /man|woman|child|king|queen|person|people|face|human/i.test(text);
+  const isTech = /ai|artificial intelligence|robot|computer|machine|data|algorithm|neural|digital|technology|software|internet/i.test(text);
 
   let style, composition;
   if (isHistorical) {
-    style = 'cinematic historical film still, period-accurate details, dramatic lighting';
+    style = 'cinematic historical film still, period-accurate details, warm natural lighting, clear subject';
     composition = 'epic wide composition';
+  } else if (isTech) {
+    style = 'bright clean futuristic 3D illustration, vibrant blue and white palette, glowing accents, ultra sharp, professional explainer-video style';
+    composition = 'clear centered composition with strong focal point';
   } else if (isAction) {
-    style = 'dynamic cinematic action shot, dramatic motion feel, high contrast';
-    composition = 'dramatic low-angle dynamic framing';
+    style = 'dynamic action illustration, vibrant colors, high energy, sharp details';
+    composition = 'dramatic dynamic framing';
   } else if (isEmotional) {
-    style = 'emotional cinematic portrait, soft dramatic lighting, shallow depth of field';
+    style = 'warm emotional illustration, soft beautiful lighting, expressive, shallow depth of field';
     composition = 'intimate close-up composition';
   } else if (isNature) {
-    style = 'breathtaking cinematic nature photography, golden hour, ultra detailed';
+    style = 'breathtaking nature photography, golden hour, ultra detailed, vibrant';
     composition = 'sweeping wide landscape composition';
   } else if (isPerson) {
-    style = 'cinematic character shot, dramatic rim lighting, photorealistic';
+    style = 'professional character illustration, bright flattering lighting, photorealistic, sharp focus';
     composition = 'medium shot, rule-of-thirds composition';
   } else {
-    style = 'cinematic photorealistic film still, dramatic lighting';
-    composition = 'balanced cinematic composition';
+    style = 'bright clean professional illustration, vibrant colors, sharp details, modern explainer-video style';
+    composition = 'balanced clear composition';
   }
-  return `${style}, ${composition}: ${concept.slice(0, 250)}. Ultra detailed, ${aspect} aspect ratio, no text, no watermark, no logo, no blur`;
+  // Extract the core visual subject: strip question words, focus on nouns/concepts.
+  const subject = concept.slice(0, 250).replace(/^(have you ever wondered|welcome to|think about it|but remember|so here'?s)/i, '').trim();
+  return `${style}, ${composition}: ${subject}. Bright daylight quality lighting, vivid colors, highly detailed, sharp focus, ${aspect} aspect ratio, no text, no words, no watermark, no logo, no blur, no darkness`;
 }
 
 async function downloadTo(url, dest, timeoutMs = 60000) {
