@@ -3,7 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import archiver from 'archiver';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const archiver = require('archiver');
 import { DATA_DIR } from './config.js';
 import { analyzeScript, heuristicAnalyze } from './gemini.js';
 import { discoverForScene } from './footage.js';
