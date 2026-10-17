@@ -19,7 +19,7 @@ app.get('/api/status', (req, res) => {
 });
 
 app.post('/api/packs', (req, res) => {
-  const { script } = req.body || {};
+  const { script, aspect } = req.body || {};
   if (!script || typeof script !== 'string' || script.trim().length < 20) {
     return res.status(400).json({ error: 'Please paste a script of at least 20 characters.' });
   }
@@ -27,7 +27,7 @@ app.post('/api/packs', (req, res) => {
     return res.status(400).json({ error: 'Script too long (max 20,000 characters).' });
   }
   const id = crypto.randomBytes(8).toString('hex');
-  buildBrollPack(script.trim(), { packId: id }).catch(() => {});
+  buildBrollPack(script.trim(), { packId: id, aspect: aspect || '16:9' }).catch(() => {});
   res.status(201).json({ id, stage: 'analyzing' });
 });
 

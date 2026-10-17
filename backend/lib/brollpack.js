@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const archiver = require('archiver');
 import { DATA_DIR } from './config.js';
 import { analyzeScript, heuristicAnalyze } from './gemini.js';
-import { discoverForScene } from './footage.js';
+import { writeScenePrompt, generateAiImage, imageToVideo, RATIOS } from './aigen.js';
 
 const PACKS_DIR = path.join(DATA_DIR, 'packs');
 
@@ -38,7 +38,9 @@ function segmentScript(script, scenes) {
 }
 
 export async function buildBrollPack(script, options = {}) {
-  const id = crypto.randomBytes(8).toString('hex');
+  const id = options.packId || crypto.randomBytes(8).toString('hex');
+  const aspect = RATIOS[options.aspect] ? options.aspect : '16:9';
+  const { w, h } = RATIOS[aspect];
   const dir = path.join(PACKS_DIR, id);
   const mediaDir = path.join(dir, 'media');
   const assetsDir = path.join(dir, 'assets');
@@ -61,35 +63,32 @@ export async function buildBrollPack(script, options = {}) {
     status.totalSegments = segments.length;
     save(status);
 
-    // Collect visuals: historical segments prefer Wikimedia archival.
-    const usedUrls = new Set();
+    // AI-FIRST (user): every 4s segment gets an AI-generated visual.
+    // Flow per segment: analyze → write prompt → generate image → animate to 4s video.
     const results = [];
-    const BATCH = 4;
+    const BATCH = 2; // AI generation is heavy — 2 at a time.
     for (let b = 0; b < segments.length; b += BATCH) {
       const batch = segments.slice(b, b + BATCH);
-      const found = await Promise.all(batch.map((seg, bi) => {
-        // Build a proof-oriented scene object for discovery.
-        const proofScene = {
-          sceneId: `seg-${seg.segId}`,
-          narration: seg.text,
-          visualConcept: seg.isHistorical
-            ? `historical archival: ${seg.visualConcept}`
-            : seg.visualConcept,
-          visualType: 'broll',
-          // Force Wikimedia priority for historical proof.
-          preferArchival: seg.isHistorical,
-        };
-        return discoverForScene(proofScene, mediaDir, seg.segId, { exclude: usedUrls });
-      }));
-      for (const a of found) {
-        if (a.status === 'ok' && a.fileUrl && !usedUrls.has(a.fileUrl)) {
-          usedUrls.add(a.fileUrl);
-          if (a.assetId) usedUrls.add(String(a.assetId));
+      const found = await Promise.all(batch.map(async (seg) => {
+        const num = String(seg.segId + 1).padStart(3, '0');
+        try {
+          const prompt = writeScenePrompt(seg, aspect);
+          const imgPath = path.join(mediaDir, `seg-${num}-ai.jpg`);
+          const gen = await generateAiImage(prompt, imgPath, { width: w, height: h, aspect });
+          const vidPath = path.join(mediaDir, `seg-${num}-ai.mp4`);
+          await imageToVideo(imgPath, vidPath, 4, seg.segId, { width: w, height: h });
+          return {
+            status: 'ok', provider: gen.provider + ' (AI video)',
+            kind: 'video', file: vidPath, prompt,
+            fileUrl: '', assetId: `ai-${seg.segId}`,
+          };
+        } catch (e) {
+          return { status: 'failed', error: e.message, segId: seg.segId };
         }
-        results.push(a);
-      }
+      }));
+      for (const a of found) results.push(a);
       status.progress = 10 + Math.round(((b + batch.length) / segments.length) * 70);
-      status.stageDetail = `Collected ${results.length}/${segments.length} b-roll clips…`;
+      status.stageDetail = `Generated ${results.filter((r) => r.status === 'ok').length}/${segments.length} AI clips…`;
       save(status);
     }
 

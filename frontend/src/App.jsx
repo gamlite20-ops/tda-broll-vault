@@ -8,6 +8,7 @@ const api = async (url, opts) => {
 
 export default function App() {
   const [script, setScript] = useState('');
+  const [aspect, setAspect] = useState('16:9');
   const [packId, setPackId] = useState(null);
   const [status, setStatus] = useState(null);
   const [err, setErr] = useState('');
@@ -21,7 +22,7 @@ export default function App() {
     try {
       const r = await api('/api/packs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script: script.trim() }),
+        body: JSON.stringify({ script: script.trim(), aspect }),
       });
       setPackId(r.id);
     } catch (e) { setErr(e.message); setBusy(false); }
@@ -68,6 +69,18 @@ export default function App() {
             <span>🏛️ Historical scenes → real archival visuals (Wikimedia)</span>
             <span>🤖 Na mile → AI generate karega</span>
             <span>📦 ZIP mein tarteeb-wise: seg-001, seg-002…</span>
+          </div>
+          <label className="field-label">Visual ratio</label>
+          <div className="ratio-row">
+            {[
+              ['16:9', '16:9 — YouTube'],
+              ['9:16', '9:16 — Shorts/Reels'],
+              ['1:1', '1:1 — Square'],
+            ].map(([v, label]) => (
+              <button key={v}
+                className={'ratio-btn' + (aspect === v ? ' active' : '')}
+                onClick={() => setAspect(v)}>{label}</button>
+            ))}
           </div>
           {err && <div className="error">{err}</div>}
           <button className="primary big" disabled={busy || words < 5} onClick={start}>
