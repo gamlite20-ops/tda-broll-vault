@@ -71,76 +71,49 @@ async function downloadTo(url, dest, timeoutMs = 60000) {
   }
 }
 
-// Generate an AI image: Gemini (primary) → Cloudflare Flux → Pollinations.
-// Fast failover: each provider gets ONE quick attempt so a slow/failing
-// provider doesn't stall the whole pack.
+// Generate an AI image: Cloudflare FLUX.2 (primary, best FREE) → Pollinations.
+// NOTE: Gemini image generation requires a PAID tier ("free tier: Not available"),
+// so it is intentionally skipped — Cloudflare is the best free option.
 export async function generateAiImage(prompt, dest, { width = 1280, height = 720, aspect = '16:9' } = {}) {
-  // 1) Gemini image generation (user's key already configured — best quality).
-  // Try current model names in order (old preview names get retired).
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const GEMINI_IMAGE_MODELS = [
-    'gemini-3.1-flash-image-preview', // Nano Banana 2 (current)
-    'gemini-2.5-flash-image',         // Nano Banana (legacy, may still work)
+  // Try Cloudflare Flux models (best FREE option — Gemini image needs paid tier).
+  // Order: newest/best first.
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  const FLUX_MODELS = [
+    '@cf/black-forest-labs/flux-2-dev',      // FLUX.2 — highly realistic & detailed
+    '@cf/black-forest-labs/flux-1-schnell',  // FLUX.1 — fast fallback
+    '@cf/lykon/dreamshaper-8-lcm',           // Dreamshaper — photorealism tuned
   ];
-  if (geminiKey) {
-    for (const model of GEMINI_IMAGE_MODELS) {
+  if (accountId && token) {
+    for (const model of FLUX_MODELS) {
       try {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 45000);
+        const timer = setTimeout(() => ctrl.abort(), 60000);
         try {
           const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+            `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                contents: [{ parts: [{ text: `Generate a ${aspect} aspect ratio cinematic image (${width}x${height}): ${prompt}` }] }],
-                generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+                prompt,
+                num_steps: 8, // More steps = better quality (still fast)
               }),
               signal: ctrl.signal,
             }
           );
           const data = await res.json();
-          const parts = data?.candidates?.[0]?.content?.parts || [];
-          const imgPart = parts.find((p) => p.inlineData?.data);
-          if (!imgPart) throw new Error(data?.error?.message || 'No image in Gemini response');
-          fs.writeFileSync(dest, Buffer.from(imgPart.inlineData.data, 'base64'));
-          return { provider: 'Gemini AI', file: dest };
+          const b64 = data?.result?.image;
+          if (!b64) throw new Error(data?.errors?.[0]?.message || 'No image in Flux response');
+          fs.writeFileSync(dest, Buffer.from(b64, 'base64'));
+          const shortName = model.split('/').pop();
+          return { provider: `Cloudflare ${shortName}`, file: dest };
         } finally {
           clearTimeout(timer);
         }
       } catch (e) {
-        console.error(`[aigen] Gemini ${model} failed, trying next:`, e.message?.slice(0, 120));
+        console.error(`[aigen] ${model} failed, trying next:`, e.message?.slice(0, 100));
       }
-    }
-  }
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const token = process.env.CLOUDFLARE_API_TOKEN;
-  // Try Flux once (fast failover).
-  if (accountId && token) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 45000);
-      try {
-        const res = await fetch(
-          `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
-          {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt }),
-            signal: ctrl.signal,
-          }
-        );
-        const data = await res.json();
-        const b64 = data?.result?.image;
-        if (!b64) throw new Error('No image in Flux response');
-        fs.writeFileSync(dest, Buffer.from(b64, 'base64'));
-        return { provider: 'Cloudflare Flux', file: dest };
-      } finally {
-        clearTimeout(timer);
-      }
-    } catch (e) {
-      console.error('[aigen] Flux failed, trying Pollinations:', e.message);
     }
   }
   // Fallback: Pollinations (reliable, ~5s).
