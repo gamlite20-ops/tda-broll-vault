@@ -68,35 +68,42 @@ async function downloadTo(url, dest, timeoutMs = 60000) {
 // provider doesn't stall the whole pack.
 export async function generateAiImage(prompt, dest, { width = 1280, height = 720, aspect = '16:9' } = {}) {
   // 1) Gemini image generation (user's key already configured — best quality).
+  // Try current model names in order (old preview names get retired).
   const geminiKey = process.env.GEMINI_API_KEY;
+  const GEMINI_IMAGE_MODELS = [
+    'gemini-3.1-flash-image-preview', // Nano Banana 2 (current)
+    'gemini-2.5-flash-image',         // Nano Banana (legacy, may still work)
+  ];
   if (geminiKey) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 45000);
+    for (const model of GEMINI_IMAGE_MODELS) {
       try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${geminiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: `Generate a ${aspect} aspect ratio cinematic image (${width}x${height}): ${prompt}` }] }],
-              generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-            }),
-            signal: ctrl.signal,
-          }
-        );
-        const data = await res.json();
-        const parts = data?.candidates?.[0]?.content?.parts || [];
-        const imgPart = parts.find((p) => p.inlineData?.data);
-        if (!imgPart) throw new Error(data?.error?.message || 'No image in Gemini response');
-        fs.writeFileSync(dest, Buffer.from(imgPart.inlineData.data, 'base64'));
-        return { provider: 'Gemini AI', file: dest };
-      } finally {
-        clearTimeout(timer);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 45000);
+        try {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: `Generate a ${aspect} aspect ratio cinematic image (${width}x${height}): ${prompt}` }] }],
+                generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+              }),
+              signal: ctrl.signal,
+            }
+          );
+          const data = await res.json();
+          const parts = data?.candidates?.[0]?.content?.parts || [];
+          const imgPart = parts.find((p) => p.inlineData?.data);
+          if (!imgPart) throw new Error(data?.error?.message || 'No image in Gemini response');
+          fs.writeFileSync(dest, Buffer.from(imgPart.inlineData.data, 'base64'));
+          return { provider: 'Gemini AI', file: dest };
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (e) {
+        console.error(`[aigen] Gemini ${model} failed, trying next:`, e.message?.slice(0, 120));
       }
-    } catch (e) {
-      console.error('[aigen] Gemini image failed, trying Flux:', e.message);
     }
   }
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;

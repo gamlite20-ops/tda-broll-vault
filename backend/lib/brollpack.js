@@ -66,14 +66,18 @@ export async function buildBrollPack(script, options = {}) {
     // AI-FIRST (user): every 4s segment gets an AI-generated visual.
     // Flow per segment: analyze → write prompt → generate image → animate to 4s video.
     // Progress updates after EVERY segment so the UI never looks stuck.
+    // Memory-safe on 512MB: images generate in parallel, but FFmpeg runs
+    // SEQUENTIALLY (parallel zoompan = OOM on free tier).
     const results = [];
-    const BATCH = 4; // 4 parallel AI generations.
+    const BATCH = 4; // 4 parallel AI image generations.
     let doneCount = 0;
     const updateProgress = (currentSegNum) => {
       status.progress = 10 + Math.round((doneCount / segments.length) * 70);
       status.stageDetail = `AI clip ${doneCount}/${segments.length} ready… (generating #${currentSegNum})`;
       save(status);
     };
+    // Phase 1: generate all images in parallel batches.
+    const imgJobs = [];
     for (let b = 0; b < segments.length; b += BATCH) {
       const batch = segments.slice(b, b + BATCH);
       const found = await Promise.all(batch.map(async (seg) => {
@@ -83,22 +87,38 @@ export async function buildBrollPack(script, options = {}) {
           const prompt = writeScenePrompt(seg, aspect);
           const imgPath = path.join(mediaDir, `seg-${num}-ai.jpg`);
           const gen = await generateAiImage(prompt, imgPath, { width: w, height: h, aspect });
-          const vidPath = path.join(mediaDir, `seg-${num}-ai.mp4`);
-          await imageToVideo(imgPath, vidPath, 4, seg.segId, { width: w, height: h });
-          doneCount++;
-          updateProgress(seg.segId + 1);
-          return {
-            status: 'ok', provider: gen.provider + ' (AI video)',
-            kind: 'video', file: vidPath, prompt,
-            fileUrl: '', assetId: `ai-${seg.segId}`,
-          };
+          return { seg, num, imgPath, provider: gen.provider, prompt, ok: true };
         } catch (e) {
-          doneCount++;
-          updateProgress(seg.segId + 1);
-          return { status: 'failed', error: e.message, segId: seg.segId };
+          return { seg, num, ok: false, error: e.message };
         }
       }));
-      for (const a of found) results.push(a);
+      for (const j of found) imgJobs.push(j);
+    }
+    // Phase 2: animate sequentially (one FFmpeg at a time — memory safe).
+    for (const j of imgJobs) {
+      if (!j.ok) {
+        doneCount++;
+        updateProgress(j.seg.segId + 1);
+        results.push({ status: 'failed', error: j.error, segId: j.seg.segId });
+        continue;
+      }
+      try {
+        const vidPath = path.join(mediaDir, `seg-${j.num}-ai.mp4`);
+        await imageToVideo(j.imgPath, vidPath, 4, j.seg.segId, { width: w, height: h });
+        // Free the source image right away to keep memory low.
+        try { fs.unlinkSync(j.imgPath); } catch {}
+        doneCount++;
+        updateProgress(j.seg.segId + 1);
+        results.push({
+          status: 'ok', provider: j.provider + ' (AI video)',
+          kind: 'video', file: vidPath, prompt: j.prompt,
+          fileUrl: '', assetId: `ai-${j.seg.segId}`,
+        });
+      } catch (e) {
+        doneCount++;
+        updateProgress(j.seg.segId + 1);
+        results.push({ status: 'failed', error: e.message, segId: j.seg.segId });
+      }
     }
 
     // Organize: seg-001.mp4, seg-002.jpg… (4s each, in timeline order).
