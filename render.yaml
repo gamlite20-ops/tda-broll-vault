@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tda-broll-vault
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PIXABAY_API_KEY
+        sync: false
+      - key: COVERR_API_KEY
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false

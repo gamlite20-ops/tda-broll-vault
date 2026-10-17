@@ -1,0 +1,1 @@
+{"dependencies":{"react":"^18.3.1","react-dom":"^18.3.1"},"devDependencies":{"vite":"^5.4.0"},"name":"tda-broll-vault-frontend","private":true,"scripts":{"build":"vite build"},"type":"module","version":"1.0.0"}

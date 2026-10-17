@@ -1,0 +1,1 @@
+{"dependencies":{},"name":"tda-broll-vault","private":true,"scripts":{"build":"npm --prefix frontend install && npm --prefix frontend run build","start":"npm --prefix backend start"},"type":"module","version":"1.0.0"}
