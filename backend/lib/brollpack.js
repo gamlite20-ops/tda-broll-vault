@@ -50,7 +50,14 @@ export async function buildBrollPack(script, options = {}) {
   fs.mkdirSync(mediaDir, { recursive: true });
 
   const save = (obj) => fs.writeFileSync(path.join(dir, 'status.json'), JSON.stringify(obj, null, 2));
-  const status = { id, stage: 'analyzing', progress: 5, createdAt: new Date().toISOString(), error: null };
+  const status = {
+    id,
+    projectName: options.projectName || `Project ${id.slice(0, 8)}`,
+    stage: 'analyzing', progress: 5,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+    error: null,
+  };
   save(status);
 
   try {
