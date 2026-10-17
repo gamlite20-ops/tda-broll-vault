@@ -9,6 +9,7 @@ const archiver = require('archiver');
 import { DATA_DIR } from './config.js';
 import { analyzeScript, heuristicAnalyze } from './gemini.js';
 import { writeScenePrompt, generateAiImage, imageToVideo, RATIOS } from './aigen.js';
+import { uploadPackToGitHub } from './github-storage.js';
 
 const PACKS_DIR = path.join(DATA_DIR, 'packs');
 
@@ -206,6 +207,22 @@ export async function buildBrollPack(script, options = {}) {
       sizeBytes: size,
     };
     save(status);
+
+    // PERMANENT BACKUP: upload to GitHub Releases (survives server restarts).
+    // This is what makes the 48h "project safe folder" actually reliable.
+    try {
+      const gh = await uploadPackToGitHub(id, status.projectName, zipPath, {
+        segments: segments.length,
+      });
+      if (gh) {
+        status.result.permanentUrl = gh.downloadUrl;
+        status.result.githubRelease = gh.tag;
+        save(status);
+      }
+    } catch (e) {
+      console.error('[brollpack] GitHub backup failed:', e.message);
+    }
+
     return status;
   } catch (e) {
     status.stage = 'failed';

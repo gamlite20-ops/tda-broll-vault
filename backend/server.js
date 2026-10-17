@@ -9,6 +9,7 @@ import {
   enqueueJob, dequeueJob, markJobDone, getQueueStatus,
   recoverInterruptedJobs, listProjects, cleanupExpired, RETENTION_MS,
 } from './lib/projects.js';
+import { listGitHubProjects, cleanupExpiredGitHub } from './lib/github-storage.js';
 
 const app = express();
 app.use(cors());
@@ -41,8 +42,17 @@ app.post('/api/packs', (req, res) => {
 });
 
 // All saved projects (48h retention) — the "project save folder".
-app.get('/api/projects', (req, res) => {
-  res.json(listProjects());
+// Merges local (in-progress) + GitHub Releases (permanent, survives restarts).
+app.get('/api/projects', async (req, res) => {
+  const local = listProjects();
+  const github = await listGitHubProjects();
+  // Dedupe: prefer GitHub version (has permanent URL) if same ID exists locally.
+  const githubIds = new Set(github.map((g) => g.id));
+  const merged = [
+    ...github,
+    ...local.filter((l) => !githubIds.has(l.id)),
+  ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(merged);
 });
 
 app.get('/api/queue', (req, res) => {
@@ -107,9 +117,15 @@ app.listen(PORT, () => {
   const recovered = recoverInterruptedJobs();
   if (recovered) console.log(`[startup] Re-queued ${recovered} interrupted job(s)`);
   processQueue().catch(() => {});
-  // Hourly cleanup of expired (>48h) projects.
-  setInterval(() => {
+  // Hourly cleanup of expired (>48h) projects — local + GitHub.
+  setInterval(async () => {
     const n = cleanupExpired();
-    if (n) console.log(`[cleanup] Removed ${n} expired project(s)`);
+    if (n) console.log(`[cleanup] Removed ${n} expired local project(s)`);
+    try {
+      const g = await cleanupExpiredGitHub();
+      if (g) console.log(`[cleanup] Removed ${g} expired GitHub release(s)`);
+    } catch (e) {
+      console.error('[cleanup] GitHub cleanup failed:', e.message);
+    }
   }, 60 * 60 * 1000);
 });
